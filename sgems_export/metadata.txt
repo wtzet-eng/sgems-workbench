@@ -2,7 +2,7 @@
 name=SGeMS Workbench
 description=Preview sample points and run ordinary kriging, SGSIM and categorical SISIM with Stanford GsTL on x86-64 Linux.
 about=Writes GSLIB point sets using projected layer coordinates and optional sample elevations.
-version=0.4.1
+version=0.4.2
 qgisMinimumVersion=3.34
 qgisMaximumVersion=3.99
 author=SGeMS Point Export contributors
@@ -10,5 +10,6 @@ email=tzuk.ls@outlook.com
 experimental=True
 hasProcessingProvider=yes
 category=Vector
+homepage=https://github.com/wtzet-eng/sgems-workbench#readme
 repository=https://github.com/wtzet-eng/sgems-workbench
 tracker=https://github.com/wtzet-eng/sgems-workbench/issues
