@@ -1,8 +1,9 @@
 import os
 import shutil
-import subprocess
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+
+from qgis.PyQt.QtCore import QProcess, QProcessEnvironment
 
 
 def native_binary(candidate):
@@ -15,7 +16,7 @@ def native_binary(candidate):
                 if file.read(4) == b"\x7fELF":
                     return path.resolve()
     except OSError:
-        pass
+        return None
     return None
 
 
@@ -33,21 +34,32 @@ def discover(saved):
 
 
 def start_native(binary):
-    env = os.environ.copy()
+    binary = native_binary(binary)
+    if binary is None:
+        raise OSError("Choose an executable Linux SGeMS binary.")
+    env = QProcessEnvironment.systemEnvironment()
     directory = binary.parent
     if directory.name == "linux" and directory.parent.name == "bin":
         root = directory.parent.parent
-        env["GSTLAPPLIHOME"] = str(root) + "/"
-        env["GSTLAPPLI_HOME"] = str(root)
+        env.insert("GSTLAPPLIHOME", str(root) + "/")
+        env.insert("GSTLAPPLI_HOME", str(root))
         libraries = [str(p) for p in (root / "lib/linux", root / "plugins/designer") if p.is_dir()]
-        if env.get("LD_LIBRARY_PATH"):
-            libraries.append(env["LD_LIBRARY_PATH"])
+        if env.value("LD_LIBRARY_PATH"):
+            libraries.append(env.value("LD_LIBRARY_PATH"))
         if libraries:
-            env["LD_LIBRARY_PATH"] = os.pathsep.join(libraries)
+            env.insert("LD_LIBRARY_PATH", os.pathsep.join(libraries))
         directory = root
     log_dir = Path.home() / ".cache/sgems-workbench"
     log_dir.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(prefix="launch-", suffix=".log", dir=log_dir, delete=False) as log:
-        process = subprocess.Popen([str(binary)], cwd=directory, env=env, stdin=subprocess.DEVNULL,
-                                   stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-        return process, log.name
+        process = QProcess()
+        process.setProgram(str(binary))
+        process.setWorkingDirectory(str(directory))
+        process.setProcessEnvironment(env)
+        process.setStandardInputFile(QProcess.nullDevice())
+        process.setStandardOutputFile(log.name)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        started, pid = process.startDetached()
+        if not started:
+            raise OSError(process.errorString())
+        return pid, log.name

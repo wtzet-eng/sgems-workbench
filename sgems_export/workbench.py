@@ -178,15 +178,16 @@ class Workbench(QDialog):
                 binary = self.choose_native()
             if binary:
                 try:
-                    process, log = start_native(binary)
+                    pid, log = start_native(binary)
                 except OSError as error:
                     self.status.setText(f"Could not launch {binary}: {error}")
                     return
                 self.status.setText(f"Started {binary.name}. Startup log: {log}")
                 def check():
-                    code = process.poll()
-                    if code is not None and code != 0:
-                        self.status.setText(f"SGeMS exited with code {code}. Startup log: {log}")
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        self.status.setText(f"SGeMS closed after launch. Check the startup log: {log}")
                 QTimer.singleShot(1500, check)
             return
         self.run_app(self.executable("sgems"), [])
