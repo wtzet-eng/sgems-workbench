@@ -1,4 +1,4 @@
-# SGeMS Workbench 0.4.3
+# SGeMS Workbench 0.4.4
 Install the ZIP in QGIS 3.34–3.x using Plugins → Manage and Install Plugins → Install from ZIP. Enable SGeMS Workbench and open the Processing Toolbox. Search for “Export point set to SGeMS”.
 
 Choose a projected point layer and one or more numeric measurements. To export a subset, use the input selector’s selected features option. Each multipoint part receives the feature’s attributes. Text fields are excluded. The exported file contains no CRS definition. Record the layer CRS, units and vertical datum alongside your model.
@@ -27,3 +27,9 @@ Choose SGSIM for continuous observations or categorical SISIM for integer facies
 These workflows use the GsTL sequential simulation driver and simple kriging weights, an isotropic model with zero nugget, and a random node path. The search uses at most 16 informed neighbours within the range. Previously simulated nodes condition later nodes. Data at coincident grid nodes are honoured. In SGSIM, ties share an empirical normal score, and the back-transform clamps the tails at the observed extremes. SISIM uses observed proportions, one shared covariance for the indicators, clamps conditional probabilities and normalizes them before sampling. Off-grid observations participate at their stored coordinates.
 
 The standalone interface covers ordinary kriging and these two simulation workflows. Other standard algorithms and desktop parameter variants are pending. Simulation uses the original GsTL driver with a workbench neighbourhood, RNG and conditional distribution adapter. Reproducibility applies within this bundled build. To rebuild the simulation worker use the ordinary worker command with -std=gnu++14, simulate.cpp and output simulate-linux-x86_64. The bundled GsTL driver omits unused sampling overloads and the matrix solver header adds forward declarations for current compilers.
+
+## Send SGeMS data to QGIS or ParaView
+
+In the SGeMS desktop, save the object in ASCII GSLIB format. In Workbench choose **Open point set** and confirm the X, Y and Z columns and the missing-value code. All other columns become properties. Choose **Open Cartesian grid** for a property-only regular, axis-aligned grid. Enter the original node counts, first cell centre, spacing and missing value. GSLIB rows advance first in X, then Y, then Z.
+
+Choose **Add to QGIS map** to create a temporary PointZ layer with every property and realization. The QGIS export workflow carries the source CRS through the model in the same session. For files opened from disk, select the original CRS or choose No projection for a local grid. Use **Make Permanent** to keep the layer in a GeoPackage. **Save and open in ParaView** writes the same XYZ nodes and properties as VTK PolyData (.vtp). Grid transfer produces cell-centre points. Native binary projects, rotated grids and masked grids require conversion first.

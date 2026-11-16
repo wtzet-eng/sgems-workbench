@@ -1,8 +1,8 @@
 [general]
 name=SGeMS Workbench
 description=Preview sample points and run ordinary kriging, SGSIM and categorical SISIM with Stanford GsTL on x86-64 Linux.
-about=Writes GSLIB point sets using projected layer coordinates and optional sample elevations.
-version=0.4.3
+about=Transfers ASCII GSLIB point sets and Cartesian grid nodes into QGIS PointZ layers and ParaView point sets.
+version=0.4.4
 qgisMinimumVersion=3.34
 qgisMaximumVersion=3.99
 author=SGeMS Point Export contributors

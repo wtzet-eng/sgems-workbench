@@ -151,7 +151,7 @@ class KrigingTask(QgsTask):
             raise ValueError("An estimate collides with the point-set missing value (-99999).")
         tmp = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", dir=Path(self.output).parent, delete=False) as out:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=Path(self.output).parent, delete=False) as out:
                 tmp = out.name
                 out.write(f"{title}\n{3 + len(columns)}\nX\nY\nZ\n" + "\n".join(columns) + "\n")
                 np.savetxt(out, np.column_stack((nodes, estimates)), fmt="%.17g")
