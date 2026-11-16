@@ -1,4 +1,4 @@
-# SGeMS Workbench 0.4.4
+# SGeMS Workbench 0.4.5
 Install the ZIP in QGIS 3.34–3.x using Plugins → Manage and Install Plugins → Install from ZIP. Enable SGeMS Workbench and open the Processing Toolbox. Search for “Export point set to SGeMS”.
 
 Choose a projected point layer and one or more numeric measurements. To export a subset, use the input selector’s selected features option. Each multipoint part receives the feature’s attributes. Text fields are excluded. The exported file contains no CRS definition. Record the layer CRS, units and vertical datum alongside your model.
