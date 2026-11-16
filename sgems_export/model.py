@@ -1,12 +1,12 @@
 import os
 import platform
 import stat
-import subprocess
 import tempfile
 from pathlib import Path
 from statistics import NormalDist
 
 import numpy as np
+from qgis.PyQt.QtCore import QProcess
 from qgis.core import QgsTask
 from qgis.PyQt.QtWidgets import (
     QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLabel, QSpinBox,
@@ -59,7 +59,7 @@ def settings(parent, xyz, name, method="ordinary"):
         detail = QLabel(explanation)
         detail.setWordWrap(True)
         form.addRow(detail)
-    buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
     buttons.accepted.connect(dialog.accept)
     buttons.rejected.connect(dialog.reject)
     form.addRow(buttons)
@@ -70,7 +70,7 @@ def settings(parent, xyz, name, method="ordinary"):
 
 class KrigingTask(QgsTask):
     def __init__(self, samples, name, radius, counts, output, callback, method="ordinary", seed=12345, realizations=1):
-        super().__init__("SGeMS Workbench · " + METHODS[method], QgsTask.CanCancel)
+        super().__init__("SGeMS Workbench · " + METHODS[method], QgsTask.Flag.CanCancel)
         self.method, self.seed, self.realizations = method, seed, realizations
         self.samples = samples
         self.name = name
@@ -101,11 +101,11 @@ class KrigingTask(QgsTask):
             raise ValueError("Two observations have different values at identical XYZ. Resolve them before modelling.")
         axes = grid_axes(samples[:, :3], self.counts)
         nodes = np.stack(np.meshgrid(*axes, indexing="ij"), axis=-1).reshape(-1, 3)
-        command = [str(binary)]
+        arguments = []
         columns = [f"{self.name}_estimate", "unit_sill_variance"]
         title = f"GsTL ordinary kriging, spherical range {self.radius:g}, unit sill, zero nugget"
         if simulation:
-            command.extend([self.method, str(self.seed), str(self.realizations)])
+            arguments = [self.method, str(self.seed), str(self.realizations)]
             values, codes, frequencies = np.unique(samples[:, 3], return_inverse=True, return_counts=True)
             if len(values) < 2:
                 raise ValueError("Simulation needs at least two different conditioning values.")
@@ -125,18 +125,20 @@ class KrigingTask(QgsTask):
                 inp.write(f"{self.radius:.17g} {len(samples)} {len(nodes)}\n")
                 np.savetxt(inp, samples, fmt="%.17g")
                 np.savetxt(inp, nodes, fmt="%.17g")
-            with (job / "in").open("rb") as inp, (job / "out").open("wb") as out:
-                with subprocess.Popen(command, stdin=inp, stdout=out) as proc:
-                    while proc.poll() is None:
-                        if self.isCanceled():
-                            proc.terminate()
-                            return False
-                        try:
-                            proc.wait(timeout=.12)
-                        except subprocess.TimeoutExpired:
-                            pass
-                    if proc.returncode:
-                        raise ValueError("The solver could not condition this grid. Check sample spacing and range.")
+            process = QProcess()
+            process.setStandardInputFile(str(job / "in"))
+            process.setStandardOutputFile(str(job / "out"))
+            process.start(str(binary.resolve()), arguments)
+            if not process.waitForStarted():
+                raise RuntimeError(f"Could not start the solver: {process.errorString()}")
+            while process.state() != QProcess.ProcessState.NotRunning:
+                if self.isCanceled():
+                    process.kill()
+                    process.waitForFinished(-1)
+                    return False
+                process.waitForFinished(120)
+            if process.exitStatus() != QProcess.ExitStatus.NormalExit or process.exitCode() != 0:
+                raise ValueError("The solver could not condition this grid. Check sample spacing and range.")
             estimates = np.loadtxt(job / "out", ndmin=2)
         if simulation:
             if estimates.size != len(nodes) * self.realizations or not np.isfinite(estimates).all():

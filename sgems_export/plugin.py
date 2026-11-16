@@ -1,6 +1,9 @@
 from qgis.core import QgsApplication, QgsProcessingProvider
 from .export import Export
-from qgis.PyQt.QtWidgets import QAction
+try:
+    from qgis.PyQt.QtGui import QAction
+except ImportError:  # Qt 5
+    from qgis.PyQt.QtWidgets import QAction
 
 
 class Provider(QgsProcessingProvider):

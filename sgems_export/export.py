@@ -32,15 +32,15 @@ class Export(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
         self.addParameter(QgsProcessingParameterFeatureSource(
-            "INPUT", "Sample points (projected CRS)", [QgsProcessing.TypeVectorPoint]))
+            "INPUT", "Sample points (projected CRS)", [QgsProcessing.SourceType.TypeVectorPoint]))
         self.addParameter(QgsProcessingParameterField(
             "PROPS", "Measured properties", parentLayerParameterName="INPUT",
-            type=QgsProcessingParameterField.Numeric, allowMultiple=True))
+            type=QgsProcessingParameterField.DataType.Numeric, allowMultiple=True))
         self.addParameter(QgsProcessingParameterEnum(
             "MODE", "Vertical coordinate", ["2D (Z = 0)", "Geometry Z", "Elevation field"]))
         self.addParameter(QgsProcessingParameterField(
             "ELEV", "Elevation field (when chosen above)", parentLayerParameterName="INPUT",
-            type=QgsProcessingParameterField.Numeric, optional=True))
+            type=QgsProcessingParameterField.DataType.Numeric, optional=True))
         self.addParameter(QgsProcessingParameterBoolean(
             "RAW", "Use stored local model XY (matching XY and Z units)", defaultValue=False))
         self.addParameter(QgsProcessingParameterFileDestination(
