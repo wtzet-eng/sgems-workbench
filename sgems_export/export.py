@@ -7,7 +7,7 @@ from tempfile import NamedTemporaryFile
 from qgis.core import (
     Qgis, NULL, QgsProcessing, QgsProcessingAlgorithm, QgsProcessingException,
     QgsProcessingParameterBoolean, QgsProcessingParameterEnum, QgsProcessingParameterFeatureSource,
-    QgsProcessingParameterField, QgsProcessingParameterFileDestination,
+    QgsProcessingParameterField, QgsProcessingParameterFileDestination, QgsProcessingOutputString,
 
 )
 
@@ -46,13 +46,15 @@ class Export(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterFileDestination(
             "OUTPUT", "GSLIB point set", "GSLIB data (*.dat)"))
 
+        self.addOutput(QgsProcessingOutputString("SOURCE_CRS", "Source coordinate system (WKT)"))
+
     def processAlgorithm(self, parameters, context, feedback):
         source = self.parameterAsSource(parameters, "INPUT", context)
         if source is None:
             raise QgsProcessingException("Choose a point layer.")
         crs = source.sourceCrs()
-        raw = self.parameterAsBool(parameters, "RAW", context)
-        if not raw and crs.type() not in (Qgis.CrsType.Projected, Qgis.CrsType.DerivedProjected):
+        local_xy = self.parameterAsBool(parameters, "RAW", context)
+        if not local_xy and crs.type() not in (Qgis.CrsType.Projected, Qgis.CrsType.DerivedProjected):
             raise QgsProcessingException("Choose a projected layer, or enable stored local XY for a model grid.")
         props = self.parameterAsFields(parameters, "PROPS", context)
         elev = self.parameterAsString(parameters, "ELEV", context)
@@ -122,6 +124,6 @@ class Export(QgsProcessingAlgorithm):
         finally:
             if temp is not None:
                 os.unlink(temp)
-        frame = "stored model XY" if raw else crs.authid()
+        frame = "stored model XY" if local_xy else crs.authid()
         feedback.pushInfo(f"Exported {count} points in {frame}. In SGeMS use Point Set, X/Y/Z = 1/2/3, no-data = -99999.")
-        return {"OUTPUT": dest}
+        return {"OUTPUT": dest, "SOURCE_CRS": "" if local_xy else crs.toWkt()}

@@ -5,7 +5,11 @@ import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from html import escape
+
 import numpy as np
+from qgis.core import QgsCoordinateReferenceSystem, QgsProject
+from .transfer import grid_options, grid_points, point_layer, point_options
 from qgis.PyQt.QtCore import QProcess, QSettings, QTimer, QUrl
 from qgis.PyQt.QtGui import QDesktopServices
 from qgis.PyQt.QtWidgets import (
@@ -14,30 +18,44 @@ from qgis.PyQt.QtWidgets import (
 )
 
 
-def load_samples(path):
+def column_names(stream, minimum):
+    stream.readline()
+    count = int(stream.readline())
+    if not minimum <= count <= 4096:
+        raise ValueError("Check the number of columns and the selected SGeMS file type.")
+    return [stream.readline().strip() for _ in range(count)]
+
+
+def load_samples(path, grid=None, point=None):
     with open(path, encoding="utf-8-sig") as stream:
-        stream.readline()
-        columns = int(stream.readline())
-        if not 4 <= columns <= 4096:
-            raise ValueError("Select a point set with XYZ and at least one property.")
-        names = [stream.readline().strip() for _ in range(columns)]
-        if [n.upper() for n in names[:3]] != ["X", "Y", "Z"]:
-            raise ValueError("Expected X, Y and Z as the first three columns.")
-        properties = names[3:]
-        if len(set(properties)) != len(properties) or any(
-                not re.fullmatch(r"[A-Za-z0-9_]+", n) for n in properties):
-            raise ValueError("Use unique property names containing letters, digits or underscores.")
+        names = column_names(stream, 1 if grid else 4)
+        columns = len(names)
+        xyz, missing = point or ([0, 1, 2], -99999)
+        if not grid and not point and [n.upper() for n in names[:3]] != ["X", "Y", "Z"]:
+            raise ValueError("Choose the coordinate columns using Open point set.")
+        indices = list(range(columns)) if grid else [i for i in range(columns) if i not in xyz]
+        properties = [names[i] for i in indices]
+        if (len({n.casefold() for n in properties}) != len(properties)
+                or any(not n or not n.isprintable() for n in properties)):
+            raise ValueError("Use a distinct, non-empty name for each property.")
         data = np.loadtxt(stream, ndmin=2)
-    if not len(data) or data.shape[1] != columns or not np.isfinite(data[:, :3]).all():
-        raise ValueError("Check the number of columns and sample coordinates.")
-    data[:, 3:] = np.where(data[:, 3:] == -99999, np.nan, data[:, 3:])
+    if not len(data) or data.shape[1] != columns:
+        raise ValueError("The number of data columns must match the header.")
+    if grid:
+        axes, missing = grid
+        data = grid_points(data, axes)
+    elif point:
+        data = data[:, xyz + indices]
+    if not np.isfinite(data[:, :3]).all() or np.isinf(data[:, 3:]).any():
+        raise ValueError("Check sample coordinates and property values for infinities.")
+    data[:, 3:] = np.where(data[:, 3:] == missing, np.nan, data[:, 3:])
     return properties, data
 
 
 def write_vtk(path, properties, data):
     temp = None
     try:
-        with NamedTemporaryFile(mode="w", encoding="ascii", delete=False,
+        with NamedTemporaryFile(mode="w", encoding="utf-8", delete=False,
                                 dir=os.path.dirname(os.path.abspath(path))) as out:
             temp = out.name
             count = len(data)
@@ -51,9 +69,9 @@ def write_vtk(path, properties, data):
                 out.write(f'<DataArray Name="{name}" type="Int64" format="ascii">\n')
                 np.savetxt(out, np.arange(start, count + start), fmt="%d")
                 out.write('</DataArray>\n')
-            out.write(f'</Verts><PointData Scalars="{properties[0]}">\n')
+            out.write(f'</Verts><PointData Scalars="{escape(properties[0])}">\n')
             for index, name in enumerate(properties):
-                out.write(f'<DataArray Name="{name}" type="Float64" format="ascii">\n')
+                out.write(f'<DataArray Name="{escape(name)}" type="Float64" format="ascii">\n')
                 np.savetxt(out, data[:, index + 3], fmt="%.17g")
                 out.write('</DataArray>\n')
             out.write('</PointData></Piece></PolyData></VTKFile>\n')
@@ -90,6 +108,7 @@ class Workbench(QDialog):
         self.sample_layout.addLayout(row)
         self.button(row, "Export QGIS points…", self.export)
         self.button(row, "Open point set…", self.open_data)
+        self.button(row, "Open Cartesian grid…", self.open_grid)
         self.property = QComboBox()
         self.property.currentIndexChanged.connect(self.draw)
         row.addWidget(self.property)
@@ -101,7 +120,11 @@ class Workbench(QDialog):
         self.model_button = self.button(self.sample_layout, "Run selected algorithm…", self.model)
         self.model_button.setEnabled(False)
         self.task = None
-        self.pv_button = self.button(self.sample_layout, "Save and open in ParaView…", self.paraview)
+        outputs = QHBoxLayout()
+        self.sample_layout.addLayout(outputs)
+        self.map_button = self.button(outputs, "Add to QGIS map…", self.add_to_map)
+        self.map_button.setEnabled(False)
+        self.pv_button = self.button(outputs, "Save and open in ParaView…", self.paraview)
         self.pv_button.setEnabled(False)
         self.setup_layout.addWidget(QLabel("SGeMS setup"))
         if sys.platform.startswith("linux"):
@@ -196,21 +219,38 @@ class Workbench(QDialog):
         import processing
         result = processing.execAlgorithmDialog("sgems:exportpoints")
         if isinstance(result, dict) and result.get("OUTPUT"):
-            self.read(result["OUTPUT"])
+            self.read(result["OUTPUT"], crs=QgsCoordinateReferenceSystem(result.get("SOURCE_CRS") or ""))
 
     def open_data(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open SGeMS point set", "", "Point set (*.dat *.gslib);;All files (*)")
         if path:
-            self.read(path)
+            try:
+                with open(path, encoding="utf-8-sig") as stream:
+                    names = column_names(stream, 4)
+            except (OSError, ValueError) as error:
+                self.status.setText(str(error))
+                return
+            point = point_options(self, names)
+            if point:
+                self.read(path, point=point)
 
-    def read(self, path):
+    def open_grid(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Open SGeMS Cartesian grid", "", "GSLIB ASCII (*.dat *.gslib *.out);;All files (*)")
+        if path:
+            grid = grid_options(self)
+            if grid is not None:
+                self.read(path, grid=grid)
+
+    def read(self, path, crs=None, grid=None, point=None):
         try:
-            names, data = load_samples(path)
+            names, data = load_samples(path, grid, point)
         except (OSError, ValueError) as error:
             self.status.setText(str(error))
             return
         self.source_path = Path(path).resolve()
+        self.source_crs = crs if crs is not None else QgsCoordinateReferenceSystem()
         self.names, self.data = names, data
+        self.map_button.setEnabled(True)
         self.model_button.setEnabled(self.task is None)
         self.property.blockSignals(True)
         self.property.clear()
@@ -263,13 +303,15 @@ class Workbench(QDialog):
         options = settings(self, samples[:, :3], name, method)
         if options is None:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Save estimated grid points", f"{name}_{method}.dat", "Point set (*.dat)")
+        stem = re.sub(r"[^\w.-]+", "_", name)
+        path, _ = QFileDialog.getSaveFileName(self, "Save estimated grid points", f"{stem}_{method}.dat", "Point set (*.dat)")
         if not path:
             return
         if Path(path).resolve() == self.source_path:
             self.status.setText("Choose a separate output file to preserve your input samples.")
             return
         radius, counts, *simulation = options
+        self.model_crs = self.source_crs
         self.task = KrigingTask(samples, name, radius, counts, path, self.model_finished, method, *simulation)
         self.model_button.setEnabled(False)
         self.status.setText("Running the selected algorithm. You can cancel in QGIS Background Tasks.")
@@ -279,9 +321,30 @@ class Workbench(QDialog):
         self.task = None
         self.model_button.setEnabled(True)
         if success:
-            self.read(path)
+            self.read(path, crs=self.model_crs)
         else:
             self.status.setText(message)
+
+    def add_to_map(self):
+        from qgis.gui import QgsProjectionSelectionDialog
+        crs = self.source_crs
+        if not crs.isValid():
+            dialog = QgsProjectionSelectionDialog(self)
+            dialog.setWindowTitle("Coordinates of this SGeMS dataset")
+            dialog.setMessage("Select the original CRS. For local model coordinates choose No projection.")
+            dialog.setShowNoProjection(True)
+            dialog.setCrs(QgsCoordinateReferenceSystem())
+            if not dialog.exec():
+                return
+            crs = dialog.crs()
+        try:
+            layer = point_layer(self.source_path.stem, self.names, self.data, crs)
+            QgsProject.instance().addMapLayer(layer)
+        except (ValueError, RuntimeError) as error:
+            self.status.setText(str(error))
+            return
+        self.source_crs = crs
+        self.status.setText(f"Added {len(self.data):,} points to QGIS. Use Make Permanent to keep the layer.")
 
     def paraview(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save ParaView point set", "samples.vtp", "VTK XML PolyData (*.vtp)")
